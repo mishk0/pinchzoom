@@ -1,26 +1,26 @@
 /*
 
-    Copyright (c) Manuel Stofer 2013 - rtp.ch - RTP.PinchZoom.js
+ Copyright (c) Manuel Stofer 2013 - rtp.ch - RTP.PinchZoom.js
 
-    Permission is hereby granted, free of charge, to any person obtaining a copy
-    of this software and associated documentation files (the "Software"), to deal
-    in the Software without restriction, including without limitation the rights
-    to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-    copies of the Software, and to permit persons to whom the Software is
-    furnished to do so, subject to the following conditions:
+ Permission is hereby granted, free of charge, to any person obtaining a copy
+ of this software and associated documentation files (the "Software"), to deal
+ in the Software without restriction, including without limitation the rights
+ to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+ copies of the Software, and to permit persons to whom the Software is
+ furnished to do so, subject to the following conditions:
 
-    The above copyright notice and this permission notice shall be included in
-    all copies or substantial portions of the Software.
+ The above copyright notice and this permission notice shall be included in
+ all copies or substantial portions of the Software.
 
-    THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-    IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-    FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-    AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-    LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-    OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-    THE SOFTWARE.
+ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+ THE SOFTWARE.
 
-*/
+ */
 
 
 /*global jQuery, console, define, setTimeout, window*/
@@ -51,12 +51,14 @@
                 // default enable.
                 this.enable();
 
+                this.interaction = null;
+                this.fingers = 0;
+                this.lastTouchStart = null;
+                this.startTouches = null;
+                this.firstMove = true;
             },
             sum = function (a, b) {
                 return a + b;
-            },
-            isCloseTo = function (value, expected) {
-                return value > expected - 0.01 && value < expected + 0.01;
             };
 
         PinchZoom.prototype = {
@@ -65,6 +67,7 @@
                 tapZoomFactor: 2,
                 zoomOutFactor: 1.3,
                 animationDuration: 300,
+                doubleTapDuration: 170,
                 maxZoom: 4,
                 minZoom: 0.5,
                 lockDragAxis: false,
@@ -74,6 +77,10 @@
                 dragStartEventName: 'pz_dragstart',
                 dragEndEventName: 'pz_dragend',
                 doubleTapEventName: 'pz_doubletap'
+            },
+
+            isCloseTo: function (value, expected) {
+                return value > expected - 0.01 && value < expected + 0.01;
             },
 
             /**
@@ -102,9 +109,9 @@
                 }
             },
 
-            handleDragEnd: function () {
+            handleDragEnd: function (event) {
                 this.el.trigger(this.options.dragEndEventName);
-                this.end();
+                this.end(event);
             },
 
             /**
@@ -165,6 +172,7 @@
                     center = this.getCurrentZoomCenter();
                 }
 
+                this.doubleTapStarted = (new Date()).getTime();
                 this.animate(this.options.animationDuration, updateProgress, this.swing);
                 this.el.trigger(this.options.doubleTapEventName);
             },
@@ -229,27 +237,27 @@
              */
             drag: function (center, lastCenter) {
                 if (lastCenter) {
-                  if(this.options.lockDragAxis) {
-                    // lock scroll to position that was changed the most
-                    if(Math.abs(center.x - lastCenter.x) > Math.abs(center.y - lastCenter.y)) {
-                      this.addOffset({
-                        x: -(center.x - lastCenter.x),
-                        y: 0
-                      });
+                    if(this.options.lockDragAxis) {
+                        // lock scroll to position that was changed the most
+                        if(Math.abs(center.x - lastCenter.x) > Math.abs(center.y - lastCenter.y)) {
+                            this.addOffset({
+                                x: -(center.x - lastCenter.x),
+                                y: 0
+                            });
+                        }
+                        else {
+                            this.addOffset({
+                                y: -(center.y - lastCenter.y),
+                                x: 0
+                            });
+                        }
                     }
                     else {
-                      this.addOffset({
-                        y: -(center.y - lastCenter.y),
-                        x: 0
-                      });
+                        this.addOffset({
+                            y: -(center.y - lastCenter.y),
+                            x: -(center.x - lastCenter.x)
+                        });
                     }
-                  }
-                  else {
-                    this.addOffset({
-                      y: -(center.y - lastCenter.y),
-                      x: -(center.x - lastCenter.x)
-                    });
-                  }
                 }
             },
 
@@ -359,7 +367,7 @@
                 // use .offsetWidth instead of width()
                 // because jQuery-width() return the original width but Zepto-width() will calculate width with transform.
                 // the same as .height()
-                return this.container[0].offsetWidth / this.el[0].offsetWidth;
+                return this.el[0] ? this.container[0].offsetWidth / this.el[0].offsetWidth : null;
             },
 
             /**
@@ -367,7 +375,7 @@
              * @return the aspect ratio
              */
             getAspectRatio: function () {
-                return this.el[0].offsetWidth / this.el[0].offsetHeight;
+                return this.el[0] ? this.el[0].offsetWidth / this.el[0].offsetHeight : null;
             },
 
             /**
@@ -403,7 +411,7 @@
             },
 
             canDrag: function () {
-                return !isCloseTo(this.zoomFactor, 1);
+                return !this.isCloseTo(this.zoomFactor, 1);
             },
 
             /**
@@ -442,7 +450,6 @@
                             }
                             this.update();
                             this.stopAnimation();
-                            this.update();
                         } else {
                             if (timefn) {
                                 progress = timefn(progress);
@@ -508,17 +515,56 @@
                 });
             },
 
-            end: function () {
+            end: function (event) {
                 this.hasInteraction = false;
                 this.sanitize();
-                this.update();
+                this.smoothMovement(event);
+            },
+
+            smoothMovement: function(event) {
+                var passedX = this.startTouches[0].x - event.changedTouches[0].pageX;
+                var passedY = this.startTouches[0].y - event.changedTouches[0].pageY;
+                var passedT = Date.now() - this.lastTouchStart;
+                var m = 30000;
+                var fX = passedX / Math.pow(passedT, 2) * m;
+                var fY = passedY / Math.pow(passedT, 2) * m;
+
+                var startOffset = {
+                    x: this.offset.x,
+                    y: this.offset.y
+                };
+
+                var draw = (function (progress) {
+                    this.offset = this.sanitizeOffset({
+                        x: startOffset.x + progress * fX,
+                        y: startOffset.y + progress * fY
+                    });
+
+                    this.update();
+                }).bind(this);
+
+                this.animate(
+                    this.options.animationDuration * 3,
+                    draw,
+                    this.makeEaseOut(function(progress) {
+                        return Math.pow(progress, 5)
+                    })
+                );
+
+
+            },
+
+            makeEaseOut: function(timing) {
+                return function(timeFraction) {
+                    return 1 - timing(1 - timeFraction);
+                }
             },
 
             /**
              * Binds all required event listeners
              */
             bindEvents: function () {
-                detectGestures(this.container.get(0), this);
+                this.detectGestures(this.container.get(0));
                 // Zepto and jQuery both know about `on`
                 $(window).on('resize', this.update.bind(this));
                 $(this.el).find('img').on('load', this.update.bind(this));
@@ -551,7 +597,6 @@
                                 delete this.clone;
                             }
                         }).bind(this);
-
                     // Scale 3d and translate3d are faster (at least on ios)
                     // but they also reduce the quality.
                     // PinchZoom uses the 3d transformations during interactions
@@ -593,154 +638,181 @@
              * Enables event handling for gestures
              */
             enable: function() {
-              this.enabled = true;
+                this.enabled = true;
             },
 
             /**
              * Disables event handling for gestures
              */
             disable: function() {
-              this.enabled = false;
-            }
-        };
+                this.enabled = false;
+            },
 
-        var detectGestures = function (el, target) {
-            var interaction = null,
-                fingers = 0,
-                lastTouchStart = null,
-                startTouches = null,
+            detectGestures: function(el) {
+                el.addEventListener('touchstart', this.onTouchStart.bind(this));
+                el.addEventListener('touchmove', this.onTouchMove.bind(this));
+                el.addEventListener('touchend', this.onTouchEnd.bind(this));
+            },
 
-                setInteraction = function (newInteraction, event) {
-                    if (interaction !== newInteraction) {
+            setInteraction: function (newInteraction, event) {
+                if (this.interaction !== newInteraction) {
 
-                        if (interaction && !newInteraction) {
-                            switch (interaction) {
-                                case "zoom":
-                                    target.handleZoomEnd(event);
-                                    break;
-                                case 'drag':
-                                    target.handleDragEnd(event);
-                                    break;
-                            }
-                        }
-
-                        switch (newInteraction) {
-                            case 'zoom':
-                                target.handleZoomStart(event);
+                    if (this.interaction && !newInteraction) {
+                        switch (this.interaction) {
+                            case "zoom":
+                                this.handleZoomEnd(event);
                                 break;
                             case 'drag':
-                                target.handleDragStart(event);
+                                this.handleDragEnd(event);
                                 break;
                         }
                     }
-                    interaction = newInteraction;
-                },
 
-                updateInteraction = function (event) {
-                    if (fingers === 2) {
-                        setInteraction('zoom');
-                    } else if (fingers === 1 && target.canDrag()) {
-                        setInteraction('drag', event);
-                    } else {
-                        setInteraction(null, event);
+                    switch (newInteraction) {
+                        case 'zoom':
+                            this.handleZoomStart(event);
+                            break;
+                        case 'drag':
+                            this.handleDragStart(event);
+                            break;
                     }
-                },
+                }
 
-                targetTouches = function (touches) {
-                    return Array.prototype.slice.call(touches).map(function (touch) {
-                        return {
-                            x: touch.pageX,
-                            y: touch.pageY
-                        };
-                    });
-                },
+                this.interaction = newInteraction;
+            },
 
-                getDistance = function (a, b) {
-                    var x, y;
+            updateInteraction: function (event) {
+                if (this.fingers === 2) {
+                    this.setInteraction('zoom');
+                } else if (this.fingers === 1 && this.canDrag()) {
+                    var doubleTappedRecently = this.doubleTapStarted && (new Date()).getTime() - this.doubleTapStarted < this.options.doubleTapDuration;
+                    this.setInteraction(doubleTappedRecently ? null : 'drag', event);
+                } else {
+                    this.setInteraction(null, event);
+                }
+            },
+
+            targetTouches: function (touches) {
+                return Array.prototype.slice.call(touches).map(function (touch) {
+                    return {
+                        x: touch.pageX,
+                        y: touch.pageY
+                    };
+                });
+            },
+
+            getDistance: function (a, b) {
+                var x, y;
+                if (a && b) {
                     x = a.x - b.x;
                     y = a.y - b.y;
-                    return Math.sqrt(x * x + y * y);
-                },
-
-                calculateScale = function (startTouches, endTouches) {
-                    var startDistance = getDistance(startTouches[0], startTouches[1]),
-                        endDistance = getDistance(endTouches[0], endTouches[1]);
-                    return endDistance / startDistance;
-                },
-
-                cancelEvent = function (event) {
-                    event.stopPropagation();
-                    event.preventDefault();
-                },
-
-                detectDoubleTap = function (event) {
-                    var time = (new Date()).getTime();
-
-                    if (fingers > 1) {
-                        lastTouchStart = null;
-                    }
-
-                    if (time - lastTouchStart < 300) {
-                        cancelEvent(event);
-
-                        target.handleDoubleTap(event);
-                        switch (interaction) {
-                            case "zoom":
-                                target.handleZoomEnd(event);
-                                break;
-                            case 'drag':
-                                target.handleDragEnd(event);
-                                break;
-                        }
-                    }
-
-                    if (fingers === 1) {
-                        lastTouchStart = time;
-                    }
-                },
-                firstMove = true;
-
-            el.addEventListener('touchstart', function (event) {
-                if(target.enabled) {
-                    firstMove = true;
-                    fingers = event.touches.length;
-                    detectDoubleTap(event);
+                } else {
+                    x = 0;
+                    y = 0;
                 }
-            });
+                return Math.sqrt(x * x + y * y);
+            },
 
-            el.addEventListener('touchmove', function (event) {
-                if(target.enabled) {
-                    if (firstMove) {
-                        updateInteraction(event);
-                        if (interaction) {
-                            cancelEvent(event);
+            calculateScale: function (startTouches, endTouches) {
+                var startDistance = this.getDistance(startTouches[0], startTouches[1]),
+                    endDistance = this.getDistance(endTouches[0], endTouches[1]);
+                return endDistance / startDistance;
+            },
+
+            cancelEvent: function (event) {
+                event.stopPropagation();
+                event.preventDefault();
+            },
+
+            countFingers: function(event) {
+                return event.touches ? event.touches.length : 1;
+            },
+
+            detectDoubleTap: function (event) {
+                var time = (new Date()).getTime();
+
+                if (this.fingers > 1) {
+                    this.lastTouchStart = null;
+                }
+
+                if (time - this.lastTouchStart < this.options.doubleTapDuration) {
+                    this.cancelEvent(event);
+
+                    this.handleDoubleTap(event);
+                    switch (this.interaction) {
+                        case "zoom":
+                            this.handleZoomEnd(event);
+                            break;
+                        case 'drag':
+                            this.handleDragEnd(event);
+                            break;
+                    }
+                }
+
+                if (this.fingers === 1) {
+                    this.lastTouchStart = time;
+                }
+            },
+
+            onTouchStart: function(event) {
+                if (this.enabled) {
+                    this.startDragPosition = this.getTouches(event)[0];
+                    this.firstMove = true;
+                    this.fingers = this.countFingers(event);
+                    this.detectDoubleTap(event);
+                }
+            },
+
+            onTouchMove: function(event) {
+                if (this.enabled) {
+                    if (this.firstMove) {
+                        this.updateInteraction(event);
+                        if (this.interaction) {
+                            if (this.interaction === 'zoom') {
+                                this.cancelEvent(event);
+                            } else {
+                                var allHeight = this.container.height() * this.zoomFactor;
+                                var currentHeight = this.offset && this.offset.y + this.container.height();
+                                var touches = this.getTouches(event)[0];
+                                var direction = this.startDragPosition.y - touches.y > 0 ? 'down' : 'up';
+                                var atUpperBound = this.offset.y === 0 && direction === 'up';
+                                var atLowerBound = allHeight === currentHeight && direction === 'down';
+                                if (atUpperBound || atLowerBound) {
+                                    this.disable();
+                                    setTimeout(function() {
+                                        this.enable();
+                                    }.bind(this), 150);
+                                } else {
+                                    this.cancelEvent(event);
+                                }
+                            }
                         }
-                        startTouches = targetTouches(event.touches);
+                        this.startTouches = this.targetTouches(event.touches);
                     } else {
-                        switch (interaction) {
+                        switch (this.interaction) {
                             case 'zoom':
-                                target.handleZoom(event, calculateScale(startTouches, targetTouches(event.touches)));
+                                this.handleZoom(event, this.calculateScale(this.startTouches, this.targetTouches(event.touches)));
                                 break;
                             case 'drag':
-                                target.handleDrag(event);
+                                this.handleDrag(event);
                                 break;
                         }
-                        if (interaction) {
-                            cancelEvent(event);
-                            target.update();
+                        if (this.interaction) {
+                            this.cancelEvent(event);
+                            this.update();
                         }
                     }
 
-                    firstMove = false;
+                    this.firstMove = false;
                 }
-            });
+            },
 
-            el.addEventListener('touchend', function (event) {
-                if(target.enabled) {
-                    fingers = event.touches.length;
-                    updateInteraction(event);
+            onTouchEnd: function (event) {
+                if(this.enabled) {
+                    this.fingers = this.countFingers(event);
+                    this.updateInteraction(event);
                 }
-            });
+            }
         };
 
         return PinchZoom;
